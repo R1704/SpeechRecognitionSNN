@@ -32,9 +32,10 @@ class Convnet(nn.Module):
             pools           = [self.poollayers[i](spikes[i]) for i in range(self.n_sections)]
             pool            = torch.stack(pools,dim=0)
             winners         = sf.get_k_winners(pool)
-            output          = -1
-            if len(winners)!=0:
-                output = winners[0][0]
+            output          = self.n_sections*[-1]
+            for s in range(self.n_sections):
+                if len(winners[s])!=0:
+                    output[s] = winners[s][0]
             return output, pool
         elif self.training:
             X_sections      = [X[:,0,(i*self.section_distance):(i*self.section_distance)+self.section_length_presyn] for i in range(self.n_sections)]
@@ -48,8 +49,6 @@ class Convnet(nn.Module):
                 if len(winners[s])!=0:
                     output[s] = winners[s][0]
             return output
-
-
 
     def save_data(self, input_spk, pot, spk, winners):
         self.ctx["input_spikes"] = input_spk
@@ -65,6 +64,3 @@ class Convnet(nn.Module):
         print(sum([len(w) > 0 for w in winnerss]))
         for i in range(len(pots)):
             self.stdps[i](input_spks[i],pots[i],spks[i],winnerss[i])
-
-
-
