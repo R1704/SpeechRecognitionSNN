@@ -5,14 +5,15 @@ from . import functional as sf
 from torch.nn.parameter import Parameter
 from .utils import to_pair
 
+
 class Convolution(nn.Module):
 	r"""Performs a 2D convolution over an input spike-wave composed of several input
 	planes. Current version only supports stride of 1 with no padding.
 
-	The input is a 4D tensor with the size :math:`(T, C_{{in}}, H_{{in}}, W_{{in}})` and the crresponsing output
+	The input is a 4D tensor with the size :math:`(T, C_{{in}}, H_{{in}}, W_{{in}})` and the corresponding output
 	is of size :math:`(T, C_{{out}}, H_{{out}}, W_{{out}})`, 
 	where :math:`T` is the number of time steps, :math:`C` is the number of feature maps (channels), and
-	:math:`H`, and :math:`W` are the hight and width of the input/output planes.
+	:math:`H`, and :math:`W` are the height and width of the input/output planes.
 
 	* :attr:`in_channels` controls the number of input planes (channels/feature maps).
 
@@ -76,6 +77,7 @@ class Convolution(nn.Module):
 	def forward(self, input):
 		return fn.conv2d(input, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
+
 class Pooling(nn.Module):
 	r"""Performs a 2D max-pooling over an input signal (spike-wave or potentials) composed of several input
 	planes.
@@ -117,6 +119,7 @@ class Pooling(nn.Module):
 
 	def forward(self, input):
 		return sf.pooling(input, self.kernel_size, self.stride, self.padding)
+
 
 class STDP(nn.Module):
 	r"""Performs STDP learning rule over synapses of a convolutional layer based on the following formulation:
