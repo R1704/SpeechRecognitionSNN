@@ -152,7 +152,7 @@ def get_k_winners(potentials, kwta = 1, inhibition_radius = 0, spikes = None):
 
 	.. note::
 
-		Winners are selected sequentially. Each winner inhibits surrounding neruons in a specific radius in all of the
+		Winners are selected sequentially. Each winner inhibits surrounding neurons in a specific radius in all of the
 		other feature maps. Note that only one winner can be selected from each feature map.
 
 	Args:

@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from SpykeTorch import *
 import torch.nn as nn
 from SpykeTorch import snn
 import SpykeTorch.functional as sf
@@ -15,14 +14,31 @@ class Conv(nn.Module):
     def __init__(self):
         super(Conv, self).__init__()
 
-        self.kernel_size = (4, 6)
+        self.kernel_size = (6, 40)
         self.stride      = 1
+        self.n_conv_sections = 9
+        self.n_input_sections = 6  # 6 x 40 frequency-bands
+        self.n_feature_maps = 50
+        self.n_conv_sections = 9
+        self.n_section_length = 4
 
         # in_channels=time-frames, out_channels=n_feature_maps
-        self.conv = snn.Convolution(in_channels=40, out_channels=50, kernel_size=(4, 6)).double()
+
+        self.convs = nn.ModuleList(
+            [
+                snn.Convolution(
+                    in_channels=1, out_channels=50, kernel_size=self.kernel_size) for _ in range(self.n_conv_sections)
+            ]
+        )
 
         # Stdp
-        self.stdp1 = snn.STDP(conv_layer=self.conv, learning_rate=(0.004, -0.003))
+        self.stdps = nn.ModuleList(
+            [snn.STDP(conv_layer=conv, learning_rate=(0.004, -0.003)) for conv in self.convs]
+        )
+
+        self.pools = nn.ModuleList(
+            [snn.Pooling((self.n_section_length, self.n_section_length)) for _ in range(self.n_conv_sections)]
+        )
 
         self.ctx = {"input_spikes": None, "potentials": None, "output_spikes": None, "winners": None}
 
@@ -30,23 +46,65 @@ class Conv(nn.Module):
         for i in range(10):
             self.decision_map.extend([i] * 20)
 
-
     def forward(self, x):
-        pots = self.conv(x)
-        spks = sf.fire(potentials=pots, threshold=15)  # not sure what the threshold should be yet
-        pots = sf.pooling(spks, kernel_size=3)
-        spks = sf.fire_(pots)
 
-        # Get one winner and shut other neurons off; lateral inhibition
-        winners = sf.get_k_winners(pots, 1)
 
-        self.save_data(x, pots, spks, winners)
+        outputs = []
+        pools = []
 
-        output = -1
+        if not self.training:
+            for i in range(self.n_conv_sections):
+                # section the data
+                sec_data = x[:, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :, :]
 
-        if len(winners) != 0:
-            output = self.decision_map[winners[0][0]]
-        return output
+                # send each section through its convolutional layer
+                pots = self.convs[i](sec_data)
+
+                # get the spikes
+                spks = sf.fire(potentials=pots, threshold=23)
+
+                # pool data | in the paper they say pool by feature map and weight should be 1, is this correct?
+                pots = self.pools[i](spks)
+                pools.append(pots)
+
+                # Get one winner and shut other neurons off; lateral inhibition
+                winners = sf.get_k_winners(pots, 1, inhibition_radius=0)  # change inhibition radius ?
+                output = -1
+
+                if len(winners) != 0:
+                    output = winners[0][0]
+                    outputs.append(output)
+                return output
+
+        if self.training:
+
+            for i in range(self.n_conv_sections):
+                # section the data
+                sec_data = x[:, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :, :]
+
+                # send each section through its convolutional layer
+                pots = self.convs[i](sec_data)
+
+                # get the spikes
+                spks = sf.fire(potentials=pots, threshold=23)
+
+                # pool data | in the paper they say pool by feature map and weight should be 1, is this correct?
+                pots = self.pools[i](spks)
+                pools.append(pots)
+
+                # Get one winner and shut other neurons off; lateral inhibition
+                winners = sf.get_k_winners(pots, 1, inhibition_radius=0)  # change inhibition radius ?
+
+                self.save_data(x, pots, spks, winners)
+
+                output = -1
+
+                if len(winners) != 0:
+                    output = winners[0][0]
+                    outputs.append(output)
+                return output
+
+
 
     def save_data(self, inp_spks, pots, spks, winners):
         self.ctx['input_spikes'] = inp_spks
@@ -56,8 +114,6 @@ class Conv(nn.Module):
 
     def stdp(self):
         self.stdp1(self.ctx['input_spikes'], self.ctx['potentials'], self.ctx['spikes'], self.ctx['winners'])
-
-
 
 
 def read_data(filename):
@@ -85,28 +141,27 @@ def one_hot_decoding(data):
     return data.argmax(axis=3)
 
 def train(network, data):
-    n_input_sections = 6  # 6 x n_frequency-bands
-    n_feature_maps = 50
-    n_conv_sections = 9
-    n_section_length = 4
-
+    print(data.shape)
     network.train()
+    # for d in data:
+    #     network(d)
+    outputs = network(tensor(data))
+    print(outputs.shape)
+    network.stdp()
 
-    outputs = np.zeros((n_conv_sections, 32, 50, 2461, 4))
-    for i in range(n_conv_sections):
-        # segment the data
-        sec_data = data[:, i * n_section_length: i * n_section_length + (n_input_sections + n_section_length - 1), :, :]
-        # print(f'shape of segmented data {sec_data.shape}')
+    return outputs
 
-        # reshape it to fit pytorch
-        shape = sec_data.shape
-        sec_data_r = np.reshape(sec_data, (shape[3], shape[2], shape[0], shape[1]))
-        # print(f'reshaped segmented data {sec_data_r.shape}')
+
+    # outputs = np.zeros((n_conv_sections, 32, 50, 2461, 4))
+    # for i in range(n_conv_sections):
+    #
+    #     # reshape it to fit pytorch
+    #     shape = sec_data.shape
+    #     sec_data_r = np.reshape(sec_data, (shape[3], shape[2], shape[0], shape[1]))
+    #     # print(f'reshaped segmented data {sec_data_r.shape}')
 
         # save output
-        outputs[i] = network(tensor(sec_data_r).to(torch.double))
-        network.stdp()
-    return outputs
+        # network.stdp()
 
 def run():
 
@@ -130,10 +185,10 @@ def run():
     outputs = train(network, data_one_hot)
     print(outputs.shape)
     # reshape and show another example of a feature map
-    ex = np.reshape(outputs, (2461, 9*4, 50, 32))
-    ex_d = one_hot_decoding(ex)
-    plt.imshow(ex_d[0])
-    plt.show()
+    # ex = np.reshape(outputs, (2461, 9*4, 50, 32))
+    # ex_d = one_hot_decoding(ex)
+    # plt.imshow(ex_d[0])
+    # plt.show()
 
     # print(ex.shape)
 

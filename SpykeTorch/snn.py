@@ -87,10 +87,10 @@ class Pooling(nn.Module):
 		Regarding the structure of the spike-wave tensors, application of max-pooling over spike-wave tensors results
 		in propagation of the earliest spike within each pooling window.
 
-	The input is a 4D tensor with the size :math:`(T, C, H_{{in}}, W_{{in}})` and the crresponsing output
+	The input is a 4D tensor with the size :math:`(T, C, H_{{in}}, W_{{in}})` and the corresponding output
 	is of size :math:`(T, C, H_{{out}}, W_{{out}})`, 
 	where :math:`T` is the number of time steps, :math:`C` is the number of feature maps (channels), and
-	:math:`H`, and :math:`W` are the hight and width of the input/output planes.
+	:math:`H`, and :math:`W` are the height and width of the input/output planes.
 
 	* :attr:`kernel_size` controls the size of the pooling window. It can be a single integer or a tuple of two integers.
 
