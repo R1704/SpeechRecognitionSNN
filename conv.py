@@ -1,11 +1,16 @@
 import numpy as np
 import pandas as pd
+import scipy.io as sio
+import torch.utils.data as data_utils
 import torch.nn as nn
 from SpykeTorch import snn
 import SpykeTorch.functional as sf
 import matplotlib.pyplot as plt
 from torch import tensor
 import torch
+from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
@@ -19,6 +24,7 @@ class Conv(nn.Module):
         self.n_conv_sections = 9
         self.n_input_sections = 6  # 6 x 40 frequency-bands
         self.n_feature_maps = 50
+        self.n_frequency_bands = 40
         self.n_conv_sections = 9
         self.n_section_length = 4
 
@@ -27,7 +33,8 @@ class Conv(nn.Module):
         self.convs = nn.ModuleList(
             [
                 snn.Convolution(
-                    in_channels=1, out_channels=50, kernel_size=self.kernel_size) for _ in range(self.n_conv_sections)
+                    in_channels=1, out_channels=50, kernel_size=self.kernel_size, weight_mean=0.8, weight_std=0.05
+                ) for _ in range(self.n_conv_sections)
             ]
         )
 
@@ -37,7 +44,7 @@ class Conv(nn.Module):
         )
 
         self.pools = nn.ModuleList(
-            [snn.Pooling((self.n_section_length, self.n_section_length)) for _ in range(self.n_conv_sections)]
+            [snn.Pooling((self.n_section_length, self.n_frequency_bands)) for _ in range(self.n_conv_sections)]
         )
 
         self.ctx = {"input_spikes": None, "potentials": None, "output_spikes": None, "winners": None}
@@ -141,48 +148,66 @@ def one_hot_decoding(data):
     return data.argmax(axis=3)
 
 def train(network, data):
-    print(data.shape)
     network.train()
-    for d in range(len(data)):
-        network(data[d].reshape(1, *data[d].shape))
-    # outputs = network(tensor(data))
-    # print(outputs.shape)
-        network.stdp()
+    for d in data:
+        for x in d[0]:
+            network(x.float())
+            network.stdp()
 
     return
 
-
-    # outputs = np.zeros((n_conv_sections, 32, 50, 2461, 4))
-    # for i in range(n_conv_sections):
-    #
-    #     # reshape it to fit pytorch
-    #     shape = sec_data.shape
-    #     sec_data_r = np.reshape(sec_data, (shape[3], shape[2], shape[0], shape[1]))
-    #     # print(f'reshaped segmented data {sec_data_r.shape}')
-
-        # save output
-        # network.stdp()
-
 def run():
 
-    # get data from file
-    filename = r'ttfs_spikes_data/ttfs_spikes_train.p'
-    ttfs_spikes_train = read_data(filename)
-    print(f'original data shape (samples, timeframe, frequency) {ttfs_spikes_train.shape}')  # (sample, time-frame, frequency-band)
+    # # get data from file
+    # filename = r'ttfs_spikes_data/ttfs_spikes_train.p'
+    # ttfs_spikes_train = read_data(filename)
+    # print(f'original data shape (samples, timeframe, frequency) {ttfs_spikes_train.shape}')  # (sample, time-frame, frequency-band)
+
+    # load spikes (41 frames, 40 frequency bands)
+    ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_train.p')
+    ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_test.p')
+    ttfs_spikes_all = np.concatenate((ttfs_spikes_train, ttfs_spikes_test), axis=0)
 
     # one hot encode to use on snn
-    data_one_hot = one_hot_encoding(ttfs_spikes_train.astype(int))
-    print(f'shape after one hot encoding {data_one_hot.shape}')  # [samples, time-frames, frequency-bands, time-points]
+    spikes = one_hot_encoding(ttfs_spikes_all.astype(int))
+    print(f'shape after one hot encoding {spikes.shape}')  # [samples, time-frames, frequency-bands, time-points]
 
     # show example because we like visuals
     plt.imshow(ttfs_spikes_train[0])
     plt.show()
 
+    spikes = np.swapaxes(spikes, 1, 3)
+    print(f'shape after switching axes {spikes.shape}')  # [samples, frequency-bands, time-points, time-frames]
+
+    # add channel dimension [samples, time-points, channels, time-frames, frequency bands]
+    # (samples, 32, 1, 40, 41)
+    spikes = spikes[:, :, np.newaxis, :]
+    print(spikes.shape)
+
+    # load labels
+    train_mat = sio.loadmat("data/TIDIGIT_train.mat")
+    test_mat = sio.loadmat("data/TIDIGIT_test.mat")
+    train_targets = train_mat['train_labels'].astype(int)
+    test_targets = test_mat['test_labels'].astype(int)
+    all_targets = np.concatenate((train_targets, test_targets), axis=0)
+
+    # split data
+    X_train, X_test, y_train, y_test = train_test_split(spikes, all_targets, test_size=0.3, random_state=42)
+    print("X_train", X_train.shape, "X_test", X_test.shape)
+
+    # prepare Dataloader
+    train_torchset = data_utils.TensorDataset(torch.tensor(X_train), torch.tensor(y_train))
+    test_torchset = data_utils.TensorDataset(torch.tensor(X_test), torch.tensor(y_test))
+    train_loader = DataLoader(train_torchset, batch_size=64)
+    test_loader = DataLoader(test_torchset, batch_size=64)
+
     # Initialise Convolutional layer
     network = Conv()
 
     # run model
-    outputs = train(network, data_one_hot)
+    outputs = train(network, train_loader)
+
+
     # print(outputs.shape)
     # reshape and show another example of a feature map
     # ex = np.reshape(outputs, (2461, 9*4, 50, 32))
