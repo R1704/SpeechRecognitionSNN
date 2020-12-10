@@ -1,0 +1,18 @@
+Index: test.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import bindsnet as bn\nimport torch\nimport pickle\nfrom playground_folder.convnet import Convnet\n\ndef data_to_one_hot(data, bins=30):\n    eye = torch.eye(bins)\n    onehot = torch.zeros(bins, 1, *data.shape)\n    for i in range(data.shape[0]):\n        for j in range(data.shape[1]):\n            onehot[:,0,i,j] = eye[int(data[i,j])]\n    return onehot\ndata = pickle.load(open(\"ttfs_spikes_data/ttfs_spikes_test.p\", \"rb\"))\ninput_size, n_feature_maps, kernel_size,  n_sections, section_length_postsyn = (41, 40), 50, (6, 40),  9, 4\nnet = Convnet(input_size, n_feature_maps, kernel_size,  n_sections, section_length_postsyn)\n\nnet.train()\nfor i in range(len(data)):\n    data_in = data_to_one_hot(data[i])\n    net(data_in)\n    net.stdp()
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/test.py b/test.py
+--- a/test.py	(revision 962aa8079f535e2f77105c5c9288f42457834d82)
++++ b/test.py	(date 1607175277179)
+@@ -10,6 +10,7 @@
+         for j in range(data.shape[1]):
+             onehot[:,0,i,j] = eye[int(data[i,j])]
+     return onehot
++    
+ data = pickle.load(open("ttfs_spikes_data/ttfs_spikes_test.p", "rb"))
+ input_size, n_feature_maps, kernel_size,  n_sections, section_length_postsyn = (41, 40), 50, (6, 40),  9, 4
+ net = Convnet(input_size, n_feature_maps, kernel_size,  n_sections, section_length_postsyn)
