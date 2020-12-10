@@ -143,13 +143,13 @@ def one_hot_decoding(data):
 def train(network, data):
     print(data.shape)
     network.train()
-    # for d in data:
-    #     network(d)
-    outputs = network(tensor(data))
-    print(outputs.shape)
-    network.stdp()
+    for d in range(len(data)):
+        network(data[d].reshape(1, *data[d].shape))
+    # outputs = network(tensor(data))
+    # print(outputs.shape)
+        network.stdp()
 
-    return outputs
+    return
 
 
     # outputs = np.zeros((n_conv_sections, 32, 50, 2461, 4))
@@ -183,7 +183,7 @@ def run():
 
     # run model
     outputs = train(network, data_one_hot)
-    print(outputs.shape)
+    # print(outputs.shape)
     # reshape and show another example of a feature map
     # ex = np.reshape(outputs, (2461, 9*4, 50, 32))
     # ex_d = one_hot_decoding(ex)
