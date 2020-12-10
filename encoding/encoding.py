@@ -8,7 +8,7 @@ import pickle
 data_paths = ["test","train"]
 for path in data_paths:
 
-    data = loadmat(f"data/TIDIGIT_{path}.mat")
+    data = loadmat(f"data/TIDIGIT_v2_{path}.mat")
     samples = data[f'{path}_samples']
 
     n_samples = len(samples)
@@ -34,6 +34,12 @@ for path in data_paths:
         """
         return np.digitize(spectrogram, bins)
 
+    def spikepattern_local(spectrogram):
+        max_amplitude = np.max(spectrogram)  # global max
+        min_amplitude = np.min(spectrogram)  # global min
+        bins = np.linspace(min_amplitude, max_amplitude, n_spiketime_bins + 1)  # bins are evenly spaced
+        return np.digitize(spectrogram, bins)
+
     # Create spectrograms for each signal
     spectrograms = np.zeros((n_samples, n_rows, n_frequency_bands))
     for si, sample in enumerate(samples):
@@ -42,22 +48,20 @@ for path in data_paths:
         spect = spectrogram(sample)
         spectrograms[si] = spect
 
-    """
-    Construct the bins using global statistics. This is not made explicit in the paper,
-    and it is easily adjusted to only consider local statistics.
-    """
-    max_amplitude = np.max(spectrograms) # global max
-    min_amplitude = np.min(spectrograms) # global min
-    bins = np.linspace(min_amplitude, max_amplitude, n_spiketime_bins+1) # bins are evenly spaced
+    # """
+    # Construct the bins using global statistics. This is not made explicit in the paper,
+    # and it is easily adjusted to only consider local statistics.
+    # """
+    # max_amplitude = np.max(spectrograms) # global max
+    # min_amplitude = np.min(spectrograms) # global min
+    # bins = np.linspace(min_amplitude, max_amplitude, n_spiketime_bins+1) # bins are evenly spaced
 
     # Create spike pattern for each spectrogram
     spike_patterns = np.zeros((n_samples, n_rows, n_frequency_bands))
     for si, spectrogram in enumerate(spectrograms):
-
-        spike_patterns[si] = spikepattern(spectrogram, bins)
+        spike_patterns[si] = spikepattern_local(spectrogram)
         if si%10 == 0:
             print(f"{si}th out of {n_samples} {path} samples \t spike pattern created\r", end = "")
-
     pickle.dump(spike_patterns, open(f"data/ttfs_spikes_{path}.p", "wb"))
 
 # sample = samples[0, 0]
