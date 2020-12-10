@@ -4,11 +4,12 @@ from scipy.io import loadmat
 from python_speech_features import logfbank
 import matplotlib.pyplot as plt
 import pickle
+import os
 
 data_paths = ["test","train"]
 for path in data_paths:
 
-    data = loadmat(f"data/TIDIGIT_v2_{path}.mat")
+    data = loadmat(f"{os.getcwd()}/data/TIDIGIT_{path}.mat")
     samples = data[f'{path}_samples']
 
     n_samples = len(samples)
@@ -44,8 +45,9 @@ for path in data_paths:
     spectrograms = np.zeros((n_samples, n_rows, n_frequency_bands))
     for si, sample in enumerate(samples):
         if si%10 == 0:
-            print(f"{si}th out of {n_samples} {path} samples \t spectrogram created\r", end = "")
+            print(f"{si}th out of {n_samples} {path} samples \t spectrogram created")
         spect = spectrogram(sample)
+
         spectrograms[si] = spect
 
     # """
@@ -62,7 +64,7 @@ for path in data_paths:
         spike_patterns[si] = spikepattern_local(spectrogram)
         if si%10 == 0:
             print(f"{si}th out of {n_samples} {path} samples \t spike pattern created\r", end = "")
-    pickle.dump(spike_patterns, open(f"data/ttfs_spikes_{path}.p", "wb"))
+    pickle.dump(spike_patterns, open(f"data/ttfs_spikes_v2_{path}.p", "wb"))
 
 # sample = samples[0, 0]
 # spectrogram = spectrograms[0]
