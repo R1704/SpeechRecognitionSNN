@@ -13,6 +13,7 @@ from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn import preprocessing
+from scipy.io import loadmat
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
@@ -46,7 +47,7 @@ class Conv(nn.Module):
 
         # Pooling
         self.pools = nn.ModuleList(
-            [snn.Pooling((4, 1)) for _ in range(self.n_conv_sections)]
+            [snn.Pooling((4, 1)) for _ in range(self.n_conv_sections)]  # not sure whether the pooling kernel is right.
         )
 
         self.ctx = {"input_spikes": [], "potentials": [], "output_spikes": [], "winners": []}
@@ -126,8 +127,8 @@ def one_hot_decoding(data):
 def prep_data():
 
     # load spikes (41 frames, 40 frequency bands)
-    ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_train.p')
-    ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_test.p')
+    ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_v2_train.p')
+    ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_v2_test.p')
     ttfs_spikes_all = np.concatenate((ttfs_spikes_train, ttfs_spikes_test), axis=0)
 
     # one hot encode to use on snn
@@ -135,8 +136,8 @@ def prep_data():
     print(f'shape after one hot encoding {spikes.shape}')  # [samples, time-frames, frequency-bands, time-points]
 
     # show example because we like visuals
-    # plt.imshow(ttfs_spikes_train[0])
-    # plt.show()
+    plt.imshow(ttfs_spikes_train[0])
+    plt.show()
 
     # switch axes because spyketorch
     spikes = np.swapaxes(spikes, 1, 3)
@@ -195,7 +196,7 @@ def evaluation(network, loader):
 
 def classify(ys_train, ts_train, ys_test, ts_test):
 
-    iter = 1000
+    iter = 5000
 
     svc = LinearSVC(max_iter=iter)
     svc.fit(ys_train, ts_train)
