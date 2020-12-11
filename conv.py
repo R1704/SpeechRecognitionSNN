@@ -25,13 +25,16 @@ class Conv(nn.Module):
         self.kernel_size       = (6, 40)
         self.stride            = 1
         self.n_conv_sections   = 9
-        self.n_input_sections  = 6  # 6 x 40 frequency-bands
+        self.n_input_sections  = 6
         self.n_feature_maps    = 50
         self.n_frequency_bands = 40
         self.n_conv_sections   = 9
         self.n_section_length  = 4
 
-        # Convolutions
+        self.threshold = 23
+
+
+        # Convolution
         self.convs = nn.ModuleList(
             [
                 snn.Convolution(
@@ -50,23 +53,24 @@ class Conv(nn.Module):
             [snn.Pooling((4, 1)) for _ in range(self.n_conv_sections)]  # not sure whether the pooling kernel is right.
         )
 
-        self.ctx = {"input_spikes": [], "potentials": [], "output_spikes": [], "winners": []}
+        self.ctx = {"input_spikes": None, "potentials": None, "output_spikes": None, "winners": None}
 
     def forward(self, x):
 
         if self.training:
             # Reset lists for STDP
-            self.ctx = {"input_spikes": [], "potentials": [], "output_spikes": [], "winners": []}
-            for i in range(self.n_conv_sections):
-                # section the data by [9 tf x 40 fb]
-                sec_data = x[:, :, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :]
-                # send section through its convolutional layer
-                pots = self.convs[i](sec_data)
-                # get the spikes for each section
-                spks, pots = sf.fire(potentials=pots, threshold=23, return_thresholded_potentials=True)
-                # Get one winner and shut other neurons off; lateral inhibition
-                winners = sf.get_k_winners(pots, 1, inhibition_radius=0, spikes=spks)  # change inhibition radius ?
-                self.save_data(sec_data, pots, spks, winners)
+            self.ctx = {"input_spikes": None, "potentials": None, "output_spikes": None, "winners": None}
+            # section the data by [9 tf x 40 fb]
+            sec_data = [x[:, :, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :] for i in range(self.n_conv_sections)]
+            # send section through its convolutional layer
+            pots = [conv(sec_data[i]) for i, conv in enumerate(self.convs)]  # shape = [32, 50, 4, 1]
+            # get the spikes for each section
+            spks_pots = [sf.fire(potentials=pot, threshold=self.threshold, return_thresholded_potentials=True) for pot in pots]
+            spks = [d[0] for d in spks_pots]
+            pots = [d[1] for d in spks_pots]
+            # Get one winner and shut other neurons off; lateral inhibition
+            winners = [sf.get_k_winners(pots[i], 1, inhibition_radius=0, spikes=spks[i]) for i in range(self.n_conv_sections)]  # change inhibition radius ?
+            self.save_data(sec_data, pots, spks, winners)
 
             output = [-1 for _ in range(self.n_conv_sections)]
             for w in range(self.n_conv_sections):
@@ -75,29 +79,27 @@ class Conv(nn.Module):
             return output
 
         if not self.training:
-            self.ctx = {"input_spikes": [], "potentials": [], "output_spikes": [], "winners": []}
-            for i in range(self.n_conv_sections):
-                # section the data by [9 tf x 40 fb]
-                sec_data = x[:, :, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :]
-                # send section through its convolutional layer
-                pots = self.convs[i](sec_data)
-                # get the spikes for each section
-                spks, pots = sf.fire(potentials=pots, threshold=23, return_thresholded_potentials=True)  # spks.shape = [32, 50, 4, 1] ; pots.shape = [32, 50, 4, 1]
-                # pool each section
-                pots = self.pools[i](spks)  # pots.shape [32, 50, 1, 1]
-                self.ctx['potentials'].append(pots)
 
+            # section the data by [9 tf x 40 fb] ==> shape = [32, 1, 9, 40]
+            sec_data = [x[:, :, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :] for i in range(self.n_conv_sections)]
+            # send section through its convolutional layer
+            pots = [conv(sec_data[i]) for i, conv in enumerate(self.convs)]  # shape = [32, 50, 4, 1]
+            # get the spikes for each section
+            # spks, pots = zip(*[sf.fire(potentials=pot, threshold=23, return_thresholded_potentials=True) for pot in pots])  # spks.shape = [32, 50, 4, 1] ; pots.shape = [32, 50, 4, 1]
+            spks_pots = [sf.fire(potentials=pot, threshold=self.threshold, return_thresholded_potentials=True) for pot in pots]
+            spks = [d[0] for d in spks_pots]
+            pots = [d[1] for d in spks_pots]
+            # pool each section
+            pots = [pool(spks[i]) for i, pool in enumerate(self.pools)]  # pots.shape [32, 50, 1, 1]
             # Put all pools together
-            pots = self.ctx['potentials']
-            pots = torch.vstack(pots)  # shape = [288, 50, 1, 1]
-
+            pots = torch.cat(pots, dim=2)  # shape = [32, 50, 9, 1]
             return pots
 
     def save_data(self, inp_spks, pots, spks, winners):
-        self.ctx['input_spikes'].append(inp_spks)
-        self.ctx['potentials'].append(pots)
-        self.ctx['output_spikes'].append(spks)
-        self.ctx['winners'].append(winners)
+        self.ctx['input_spikes'] = inp_spks
+        self.ctx['potentials'] = pots
+        self.ctx['output_spikes'] = spks
+        self.ctx['winners'] = winners
 
     def stdp(self):
         for i in range(self.n_conv_sections):
@@ -133,15 +135,15 @@ def prep_data():
 
     # one hot encode to use on snn
     spikes = one_hot_encoding(ttfs_spikes_all.astype(int))
-    print(f'shape after one hot encoding {spikes.shape}')  # [samples, time-frames, frequency-bands, time-points]
+    print(f'shape after one hot encoding {spikes.shape}')  # [samples, time-frames, frequency-bands, time-points] [4950, 41, 40, 32]
 
     # show example because we like visuals
     plt.imshow(ttfs_spikes_train[0])
     plt.show()
 
     # switch axes because spyketorch
-    spikes = np.swapaxes(spikes, 1, 3)
-    spikes = np.swapaxes(spikes, 2, 3)
+    # spikes = np.swapaxes(spikes, 1, 3)
+    spikes = np.reshape(spikes, (spikes.shape[0], spikes.shape[3], spikes.shape[1], spikes.shape[2]))
     print(f'shape after switching axes {spikes.shape}')  # [samples, time-points, time-frames, frequency-bands]
 
     # add channel dimension [samples, time-points, channels, time-frames, frequency bands]
@@ -172,7 +174,8 @@ def prep_data():
 def train(network, data, n_epochs=1):
     print('Starting training ...')
     network.train()
-    for _ in range(n_epochs):
+    for e in range(n_epochs):
+        print(f'Starting epoch {e}')
         for d, _ in data:
             for x in d:
                 network(x.float())
@@ -196,7 +199,7 @@ def evaluation(network, loader):
 
 def classify(ys_train, ts_train, ys_test, ts_test):
 
-    iter = 5000
+    iter = 1000
 
     svc = LinearSVC(max_iter=iter)
     svc.fit(ys_train, ts_train)
@@ -208,6 +211,7 @@ def classify(ys_train, ts_train, ys_test, ts_test):
     print("accuracy predict pot train", accuracy_score(ts_train, pred_train))
     print("accuracy predict pot test", accuracy_score(ts_test, pred_test))
 
+
 def run():
 
     # Prepare and get data
@@ -217,7 +221,7 @@ def run():
     network = Conv()
 
     # run model
-    train(network, train_loader)
+    train(network, train_loader, n_epochs=1)
 
     # Evaluate
     ys_train, ts_train = evaluation(network, train_loader)
