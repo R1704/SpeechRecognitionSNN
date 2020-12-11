@@ -9,8 +9,10 @@ import matplotlib.pyplot as plt
 from torch import tensor
 import torch
 from torch.utils.data import DataLoader
+from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
+from sklearn import preprocessing
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
@@ -19,17 +21,16 @@ class Conv(nn.Module):
     def __init__(self):
         super(Conv, self).__init__()
 
-        self.kernel_size = (6, 40)
-        self.stride      = 1
-        self.n_conv_sections = 9
-        self.n_input_sections = 6  # 6 x 40 frequency-bands
-        self.n_feature_maps = 50
+        self.kernel_size       = (6, 40)
+        self.stride            = 1
+        self.n_conv_sections   = 9
+        self.n_input_sections  = 6  # 6 x 40 frequency-bands
+        self.n_feature_maps    = 50
         self.n_frequency_bands = 40
-        self.n_conv_sections = 9
-        self.n_section_length = 4
+        self.n_conv_sections   = 9
+        self.n_section_length  = 4
 
-        # in_channels=time-frames, out_channels=n_feature_maps
-
+        # Convolutions
         self.convs = nn.ModuleList(
             [
                 snn.Convolution(
@@ -43,14 +44,34 @@ class Conv(nn.Module):
             [snn.STDP(conv_layer=conv, learning_rate=(0.004, -0.003)) for conv in self.convs]
         )
 
+        # Pooling
         self.pools = nn.ModuleList(
             [snn.Pooling((4, 1)) for _ in range(self.n_conv_sections)]
         )
 
         self.ctx = {"input_spikes": [], "potentials": [], "output_spikes": [], "winners": []}
 
-
     def forward(self, x):
+
+        if self.training:
+            # Reset lists for STDP
+            self.ctx = {"input_spikes": [], "potentials": [], "output_spikes": [], "winners": []}
+            for i in range(self.n_conv_sections):
+                # section the data by [9 tf x 40 fb]
+                sec_data = x[:, :, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :]
+                # send section through its convolutional layer
+                pots = self.convs[i](sec_data)
+                # get the spikes for each section
+                spks, pots = sf.fire(potentials=pots, threshold=23, return_thresholded_potentials=True)
+                # Get one winner and shut other neurons off; lateral inhibition
+                winners = sf.get_k_winners(pots, 1, inhibition_radius=0, spikes=spks)  # change inhibition radius ?
+                self.save_data(sec_data, pots, spks, winners)
+
+            output = [-1 for _ in range(self.n_conv_sections)]
+            for w in range(self.n_conv_sections):
+                if len(self.ctx['winners'][w]) != 0:
+                    output[w] = self.ctx['winners'][w][0]
+            return output
 
         if not self.training:
             self.ctx = {"input_spikes": [], "potentials": [], "output_spikes": [], "winners": []}
@@ -60,42 +81,16 @@ class Conv(nn.Module):
                 # send section through its convolutional layer
                 pots = self.convs[i](sec_data)
                 # get the spikes for each section
-                spks = sf.fire(potentials=pots, threshold=23)  # spks.shape = [32, 50, 4, 1] ; pots.shape = [32, 50, 4, 1]
+                spks, pots = sf.fire(potentials=pots, threshold=23, return_thresholded_potentials=True)  # spks.shape = [32, 50, 4, 1] ; pots.shape = [32, 50, 4, 1]
                 # pool each section
                 pots = self.pools[i](spks)  # pots.shape [32, 50, 1, 1]
                 self.ctx['potentials'].append(pots)
+
             # Put all pools together
             pots = self.ctx['potentials']
-            pots = torch.vstack(pots)
+            pots = torch.vstack(pots)  # shape = [288, 50, 1, 1]
 
-            # Get one winner and shut other neurons off; lateral inhibition
-            # change inhibition radius ?
-            winners = sf.get_k_winners(pots, 1, inhibition_radius=0)
-
-            output = -1
-            if len(winners) != 0:
-                output = winners[0]
-            return output
-
-        if self.training:
-            self.ctx = {"input_spikes": [], "potentials": [], "output_spikes": [], "winners": []}
-            for i in range(self.n_conv_sections):
-                # section the data by [9 tf x 40 fb]
-                sec_data = x[:, :, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :]
-                # send section through its convolutional layer
-                pots = self.convs[i](sec_data)
-                # get the spikes for each section
-                spks = sf.fire(potentials=pots, threshold=23)
-                # Get one winner and shut other neurons off; lateral inhibition
-                # change inhibition radius ?
-                winners = sf.get_k_winners(pots, 1, inhibition_radius=0)
-                self.save_data(sec_data, pots, spks, winners)
-
-            output = [-1 for _ in range(self.n_conv_sections)]
-            for w in range(self.n_conv_sections):
-                if len(self.ctx['winners'][w]) != 0:
-                    output[w] = self.ctx['winners'][w][0]
-            return output
+            return pots
 
     def save_data(self, inp_spks, pots, spks, winners):
         self.ctx['input_spikes'].append(inp_spks)
@@ -173,54 +168,44 @@ def prep_data():
     return train_loader, test_loader
 
 
-def train(network, data):
+def train(network, data, n_epochs=1):
     print('Starting training ...')
     network.train()
-    for d in data:
-        for x in d[0]:
-            network(x.float())
-            network.stdp()
+    for _ in range(n_epochs):
+        for d, _ in data:
+            for x in d:
+                network(x.float())
+                network.stdp()
+    print('Training done ...')
 
 
-def evaluation(network, data):
+def evaluation(network, loader):
+    ys = []  # outputs
+    ts = []  # targets
     print('Starting evaluation ...')
     network.eval()
-    for d, t in data:
-        for x in d:
-            network(x.float())
+    for data, targets in loader:
+        for x, t in zip(data, targets):
+            y = network(x.float())
+            ys.append(y.reshape(-1).cpu().numpy())
+            ts.append(t)
+    print('Evaluation done ...')
+    return np.asarray(ys), np.asarray(ts)
 
 
-    # # Training Vectors
-    # train_x_spike = []
-    # train_x_pot = []
-    # train_y = []
-    # for data, targets in train_loader:
-    #     for x, t in zip(data, targets):
-    #         p = net.conv(x.float())
-    #         p = pool(p)
-    #         o = sf.fire(p, 23)
-    #         train_x_spike.append(o.reshape(-1).cpu().numpy())
-    #         train_x_pot.append(p.reshape(-1).cpu().numpy())
-    #         train_y.append(t)
-    # train_x_spike = np.array(train_x_spike)
-    # train_x_pot = np.array(train_x_pot)
-    # train_y = np.array(train_y)
+def classify(ys_train, ts_train, ys_test, ts_test):
 
+    iter = 1000
 
-    # # Classifier
-    # clf_spike = LinearSVC(max_iter=clf_iter, verbose=1)
-    # clf_pot = LinearSVC(max_iter=clf_iter, verbose=1)
-    # clf_spike.fit(train_x_spike, train_y)
-    # clf_pot.fit(train_x_pot, train_y)
-    #
-    # # Inference
-    # predict_spike = clf_spike.predict(test_x_spike)
-    # predict_pot = clf_pot.predict(test_x_pot)
-    # print("epochs", epochs)
-    # print("clf_iter", clf_iter)
-    # print("accuracy predict spike", accuracy_score(y_test, predict_spike))
-    # print("accuracy predict pot", accuracy_score(y_test, predict_pot))
+    svc = LinearSVC(max_iter=iter)
+    svc.fit(ys_train, ts_train)
 
+    # Inference
+    pred_train = svc.predict(ys_train)
+    pred_test = svc.predict(ys_test)
+    print("clf_iter", iter)
+    print("accuracy predict pot train", accuracy_score(ts_train, pred_train))
+    print("accuracy predict pot test", accuracy_score(ts_test, pred_test))
 
 def run():
 
@@ -232,9 +217,14 @@ def run():
 
     # run model
     train(network, train_loader)
-    print('Training done ...')
 
-    evaluation(network, train_loader)
+    # Evaluate
+    ys_train, ts_train = evaluation(network, train_loader)
+    ys_test, ts_test = evaluation(network, test_loader)
+
+    # Classify
+    classify(ys_train, ts_train, ys_test, ts_test)
+
 
 
     # reshape and show another example of a feature map
