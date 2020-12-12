@@ -65,9 +65,9 @@ class Conv(nn.Module):
             # send section through its convolutional layer
             pots = [conv(sec_data[i]) for i, conv in enumerate(self.convs)]  # shape = [32, 50, 4, 1]
             # get the spikes for each section
-            spks_pots = [sf.fire(potentials=pot, threshold=self.threshold, return_thresholded_potentials=True) for pot in pots]
-            spks = [d[0] for d in spks_pots]
-            pots = [d[1] for d in spks_pots]
+            spks = [sf.fire(potentials=pot, threshold=self.threshold) for pot in pots]
+            # spks = [d[0] for d in spks_pots]
+            # pots = [d[1] for d in spks_pots]
             # Get one winner and shut other neurons off; lateral inhibition
             winners = [sf.get_k_winners(pots[i], 1, inhibition_radius=0, spikes=spks[i]) for i in range(self.n_conv_sections)]  # change inhibition radius ?
             self.save_data(sec_data, pots, spks, winners)
@@ -86,11 +86,11 @@ class Conv(nn.Module):
             pots = [conv(sec_data[i]) for i, conv in enumerate(self.convs)]  # shape = [32, 50, 4, 1]
             # get the spikes for each section
             # spks, pots = zip(*[sf.fire(potentials=pot, threshold=23, return_thresholded_potentials=True) for pot in pots])  # spks.shape = [32, 50, 4, 1] ; pots.shape = [32, 50, 4, 1]
-            spks_pots = [sf.fire(potentials=pot, threshold=self.threshold, return_thresholded_potentials=True) for pot in pots]
-            spks = [d[0] for d in spks_pots]
-            pots = [d[1] for d in spks_pots]
+            # spks = [sf.fire(potentials=pot, threshold=self.threshold) for pot in pots]
+            # spks = [d[0] for d in spks_pots]
+            # pots = [d[1] for d in spks_pots]
             # pool each section
-            pots = [pool(spks[i]) for i, pool in enumerate(self.pools)]  # pots.shape [32, 50, 1, 1]
+            pots = [pool(pots[i]) for i, pool in enumerate(self.pools)]  # pots.shape [32, 50, 1, 1]
             # Put all pools together
             pots = torch.cat(pots, dim=2)  # shape = [32, 50, 9, 1]
             return pots
@@ -102,8 +102,8 @@ class Conv(nn.Module):
         self.ctx['winners'] = winners
 
     def stdp(self):
-        for i in range(self.n_conv_sections):
-            self.stdps[i](self.ctx['input_spikes'][i], self.ctx['potentials'][i], self.ctx['output_spikes'][i], self.ctx['winners'][i])
+        for i, stdp in enumerate(self.stdps):
+            stdp(self.ctx['input_spikes'][i], self.ctx['potentials'][i], self.ctx['output_spikes'][i], self.ctx['winners'][i])
 
 
 def one_hot_encoding(data):
@@ -198,10 +198,10 @@ def evaluation(network, loader):
 
 
 def classify(ys_train, ts_train, ys_test, ts_test):
+    print('Starting classification ...')
+    iter = 2500
 
-    iter = 1000
-
-    svc = LinearSVC(max_iter=iter)
+    svc = LinearSVC(max_iter=iter, verbose=1)
     svc.fit(ys_train, ts_train)
 
     # Inference
@@ -229,6 +229,9 @@ def run():
 
     # Classify
     classify(ys_train, ts_train, ys_test, ts_test)
+
+    # TODO: accuracy is currently at 0.84 with 2500 classifier iterations. This gets better with more iterations but takes ages.
+    #  Also, I get a ConvergenceWarning. We should run this on pollox with ca. 10000 iterations and see what happens.
 
 
 
