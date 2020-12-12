@@ -6,14 +6,11 @@ import torch.nn as nn
 from SpykeTorch import snn
 import SpykeTorch.functional as sf
 import matplotlib.pyplot as plt
-from torch import tensor
 import torch
 from torch.utils.data import DataLoader
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
-from sklearn import preprocessing
-from scipy.io import loadmat
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
@@ -66,29 +63,15 @@ class Conv(nn.Module):
             pots = [conv(sec_data[i]) for i, conv in enumerate(self.convs)]  # shape = [32, 50, 4, 1]
             # get the spikes for each section
             spks = [sf.fire(potentials=pot, threshold=self.threshold) for pot in pots]
-            # spks = [d[0] for d in spks_pots]
-            # pots = [d[1] for d in spks_pots]
             # Get one winner and shut other neurons off; lateral inhibition
             winners = [sf.get_k_winners(pots[i], 1, inhibition_radius=0, spikes=spks[i]) for i in range(self.n_conv_sections)]  # change inhibition radius ?
             self.save_data(sec_data, pots, spks, winners)
 
-            output = [-1 for _ in range(self.n_conv_sections)]
-            for w in range(self.n_conv_sections):
-                if len(self.ctx['winners'][w]) != 0:
-                    output[w] = self.ctx['winners'][w][0]
-            return output
-
         if not self.training:
-
             # section the data by [9 tf x 40 fb] ==> shape = [32, 1, 9, 40]
             sec_data = [x[:, :, i * self.n_section_length: i * self.n_section_length + (self.n_input_sections + self.n_section_length - 1), :] for i in range(self.n_conv_sections)]
             # send section through its convolutional layer
             pots = [conv(sec_data[i]) for i, conv in enumerate(self.convs)]  # shape = [32, 50, 4, 1]
-            # get the spikes for each section
-            # spks, pots = zip(*[sf.fire(potentials=pot, threshold=23, return_thresholded_potentials=True) for pot in pots])  # spks.shape = [32, 50, 4, 1] ; pots.shape = [32, 50, 4, 1]
-            # spks = [sf.fire(potentials=pot, threshold=self.threshold) for pot in pots]
-            # spks = [d[0] for d in spks_pots]
-            # pots = [d[1] for d in spks_pots]
             # pool each section
             pots = [pool(pots[i]) for i, pool in enumerate(self.pools)]  # pots.shape [32, 50, 1, 1]
             # Put all pools together
@@ -233,18 +216,9 @@ def run():
     # TODO: accuracy is currently at 0.84 with 2500 classifier iterations. This gets better with more iterations but takes ages.
     #  Also, I get a ConvergenceWarning. We should run this on pollox with ca. 10000 iterations and see what happens.
 
+    # TODO: show what happens in feature maps
 
-
-    # reshape and show another example of a feature map
-    # ex = np.reshape(outputs, (2461, 9*4, 50, 32))
-    # ex_d = one_hot_decoding(ex)
-    # plt.imshow(ex_d[0])
-    # plt.show()
-
-    # print(ex.shape)
-
-
-
+    # TODO: MFCC encoding
 
 
 if __name__ == '__main__':
