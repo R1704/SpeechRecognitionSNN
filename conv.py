@@ -180,19 +180,19 @@ def evaluation(network, loader):
     return np.asarray(ys), np.asarray(ts)
 
 
-def classify(ys_train, ts_train, ys_test, ts_test):
+def classify(ys_train, ts_train, ys_test, ts_test, iterations=1000):
     print('Starting classification ...')
-    iter = 2500
 
-    svc = LinearSVC(max_iter=iter, verbose=1)
+    # Fit classifier
+    svc = LinearSVC(max_iter=iterations, verbose=1)
     svc.fit(ys_train, ts_train)
 
     # Inference
     pred_train = svc.predict(ys_train)
     pred_test = svc.predict(ys_test)
-    print("clf_iter", iter)
-    print("accuracy predict pot train", accuracy_score(ts_train, pred_train))
-    print("accuracy predict pot test", accuracy_score(ts_test, pred_test))
+    print(f'SVC run with {iterations} iterations')
+    print(f'Accuracy on training data: {accuracy_score(ts_train, pred_train)}')
+    print(f'Accuracy on testing data: {accuracy_score(ts_test, pred_test)}')
 
 
 def run():
@@ -211,10 +211,10 @@ def run():
     ys_test, ts_test = evaluation(network, test_loader)
 
     # Classify
-    classify(ys_train, ts_train, ys_test, ts_test)
+    classify(ys_train, ts_train, ys_test, ts_test, iterations=5000)
 
-    # TODO: accuracy is currently at 0.84 with 2500 classifier iterations. This gets better with more iterations but takes ages.
-    #  Also, I get a ConvergenceWarning. We should run this on pollox with ca. 10000 iterations and see what happens.
+    # TODO: accuracy is currently at 0.84 with 2500 (and 0.85 with 5000) classifier iterations. This takes ages.
+    #  Also, I get a ConvergenceWarning.
 
     # TODO: show what happens in feature maps
 
