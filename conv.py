@@ -112,8 +112,8 @@ def one_hot_decoding(data):
 def prep_data():
 
     # load spikes (41 frames, 40 frequency bands)
-    ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_v2_train.p')
-    ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_v2_test.p')
+    ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_mel_train.p')
+    ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_mel_test.p')
     ttfs_spikes_all = np.concatenate((ttfs_spikes_train, ttfs_spikes_test), axis=0)
 
     # one hot encode to use on snn
@@ -158,7 +158,7 @@ def train(network, data, n_epochs=1):
     print('Starting training ...')
     network.train()
     for e in range(n_epochs):
-        print(f'Starting epoch {e}')
+        print(f'Starting epoch {e+1}')
         for d, _ in data:
             for x in d:
                 network(x.float())
@@ -211,14 +211,18 @@ def run():
     ys_test, ts_test = evaluation(network, test_loader)
 
     # Classify
-    classify(ys_train, ts_train, ys_test, ts_test, iterations=5000)
+    classify(ys_train, ts_train, ys_test, ts_test, iterations=2500)
 
     # TODO: accuracy is currently at 0.84 with 2500 (and 0.85 with 5000) classifier iterations. This takes ages.
+    #  n_epochs doesnt seem to change anything
     #  Also, I get a ConvergenceWarning.
 
     # TODO: show what happens in feature maps
 
     # TODO: MFCC encoding
+    # Done.
+    # Accuracy on training data: 1.0
+    # Accuracy on testing data: 0.9387205387205387
 
 
 if __name__ == '__main__':
