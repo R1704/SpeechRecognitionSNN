@@ -12,6 +12,7 @@ from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 import os
+import encoding
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 
@@ -111,9 +112,15 @@ def one_hot_decoding(data):
 
 def prep_data():
 
-    # load spikes (41 frames, 40 frequency bands)
+    # Creating data
+    # results = encoding.run()
+    # ttfs_spikes_train = results[0]
+    # ttfs_spikes_test = results[1]
+
+    # Loading data (41 frames, 40 frequency bands)
     ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_mel_train.p')
     ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_mel_test.p')
+
     ttfs_spikes_all = np.concatenate((ttfs_spikes_train, ttfs_spikes_test), axis=0)
 
     # one hot encode to use on snn
@@ -125,9 +132,8 @@ def prep_data():
     plt.show()
 
     # switch axes because spyketorch
-    # spikes = np.swapaxes(spikes, 1, 3)
     spikes = np.reshape(spikes, (spikes.shape[0], spikes.shape[3], spikes.shape[1], spikes.shape[2]))
-    print(f'shape after switching axes {spikes.shape}')  # [samples, time-points, time-frames, frequency-bands]
+    print(f'shape after reshaping {spikes.shape}')  # [samples, time-points, time-frames, frequency-bands]
 
     # add channel dimension [samples, time-points, channels, time-frames, frequency bands]
     # (samples, 32, 1, 41, 40)
@@ -213,14 +219,23 @@ def run():
     # Classify
     classify(ys_train, ts_train, ys_test, ts_test, iterations=2500)
 
-    # TODO: accuracy is currently at 0.84 with 2500 (and 0.85 with 5000) classifier iterations. This takes ages.
-    #  n_epochs doesnt seem to change anything
-    #  Also, I get a ConvergenceWarning.
+    # TODO: solve ConvergenceWarning.
 
     # TODO: show what happens in feature maps
 
-    # TODO: MFCC encoding
-    # Done.
+    # Results:
+    # accuracy at 0.84 with 2500 (and 0.85 with 5000) classifier iterations. Plain version
+
+    # Trimming and librosa's melspectogram converted to spectogram and then to spikepattern (2500 iterarions)
+    # Accuracy on training data: 1.0
+    # Accuracy on testing data: 0.9387205387205387
+
+    # Librosa's melspectogram converted to spectogram and then to spikepattern (no trimming) (2500 iterarions)
+    # Accuracy on training data: 0.9971139971139971
+    # Accuracy on testing data: 0.804040404040404
+
+    # Original encoding but trimmed
+    # SVC run with 2500 iterations
     # Accuracy on training data: 1.0
     # Accuracy on testing data: 0.9387205387205387
 
