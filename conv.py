@@ -13,6 +13,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 import os
 import encoding
+from sklearn.preprocessing import StandardScaler
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 
@@ -29,7 +30,7 @@ class Conv(nn.Module):
         self.n_conv_sections   = 9
         self.n_section_length  = 4
 
-        self.threshold = 23
+        self.threshold = 6.2
 
 
         # Convolution
@@ -75,9 +76,13 @@ class Conv(nn.Module):
             pots = [conv(sec_data[i]) for i, conv in enumerate(self.convs)]  # shape = [32, 50, 4, 1]
             # pool each section
             pots = [pool(pots[i]) for i, pool in enumerate(self.pools)]  # pots.shape [32, 50, 1, 1]
+            # get the spikes for each section
+            spks = [sf.fire(potentials=pot, threshold=self.threshold) for pot in pots]
             # Put all pools together
             pots = torch.cat(pots, dim=2)  # shape = [32, 50, 9, 1]
-            return pots
+            spks = torch.cat(spks, dim=2)
+
+            return pots, spks
 
     def save_data(self, inp_spks, pots, spks, winners):
         self.ctx['input_spikes'] = inp_spks
@@ -118,9 +123,10 @@ def prep_data():
     # ttfs_spikes_test = results[1]
 
     # Loading data (41 frames, 40 frequency bands)
+    #ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_v2_train.p')
+    #ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_v2_test.p')
     ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_mel_train.p')
     ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_mel_test.p')
-
     ttfs_spikes_all = np.concatenate((ttfs_spikes_train, ttfs_spikes_test), axis=0)
 
     # one hot encode to use on snn
@@ -173,24 +179,24 @@ def train(network, data, n_epochs=1):
 
 
 def evaluation(network, loader):
-    ys = []  # outputs
+    ypots = []  # outputs (pots)
+    yspikes = []
     ts = []  # targets
     print('Starting evaluation ...')
     network.eval()
     for data, targets in loader:
         for x, t in zip(data, targets):
-            y = network(x.float())
-            ys.append(y.reshape(-1).cpu().numpy())
+            pots, spikes = network(x.float())
+            ypots.append(pots.reshape(-1).cpu().numpy())
+            yspikes.append(spikes.reshape(-1).cpu().numpy())
             ts.append(t)
     print('Evaluation done ...')
-    return np.asarray(ys), np.asarray(ts)
+    return np.asarray(ypots), np.asarray(yspikes), np.asarray(ts)
 
 
 def classify(ys_train, ts_train, ys_test, ts_test, iterations=1000):
-    print('Starting classification ...')
-
     # Fit classifier
-    svc = LinearSVC(max_iter=iterations, verbose=1)
+    svc = LinearSVC(verbose=0, dual=False, max_iter=iterations, C=1)
     svc.fit(ys_train, ts_train)
 
     # Inference
@@ -213,13 +219,14 @@ def run():
     train(network, train_loader, n_epochs=1)
 
     # Evaluate
-    ys_train, ts_train = evaluation(network, train_loader)
-    ys_test, ts_test = evaluation(network, test_loader)
+    ypots_train, yspikes_train, ts_train = evaluation(network, train_loader)
+    ypots_test, yspikes_test, ts_test = evaluation(network, test_loader)
 
     # Classify
-    classify(ys_train, ts_train, ys_test, ts_test, iterations=2500)
-
-    # TODO: solve ConvergenceWarning.
+    print("classify potential")
+    classify(ypots_train, ts_train, ypots_test, ts_test, iterations=2500)
+    print("classify spikes")
+    classify(yspikes_train, ts_train, yspikes_test, ts_test, iterations=2500)
 
     # TODO: show what happens in feature maps
 
@@ -239,6 +246,15 @@ def run():
     # Accuracy on training data: 1.0
     # Accuracy on testing data: 0.9387205387205387
 
+    # Solved convergence warning & added spikes classifier
+    # classify potential
+    # SVC run with 2500 iterations
+    # Accuracy on training data: 1.0
+    # Accuracy on testing data: 0.9508417508417508
+    # classify spikes
+    # SVC run with 2500 iterations
+    # Accuracy on training data: 1.0
+    # Accuracy on testing data: 0.960942760942761
 
 if __name__ == '__main__':
     run()
