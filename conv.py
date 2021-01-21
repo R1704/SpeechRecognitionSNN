@@ -228,10 +228,10 @@ def run():
     plt.imshow(confusion_matrix(ts_test, pred_test_pots))
     plt.title("Potential classifier confusion matrix")
     plt.show()
-    print("Spikes classifier confusion matrix")
+    print("classify spikes")
     pred_test_spikes = classify(yspikes_train, ts_train, yspikes_test, ts_test, iterations=100)
     plt.imshow(confusion_matrix(ts_test, pred_test_spikes))
-    plt.title("Spikes")
+    plt.title("Spikes classifier confusion matrix")
     plt.show()
 
     # TODO: show what happens in feature maps
