@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score
+from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 import os
 import encoding
@@ -23,11 +24,10 @@ class Conv(nn.Module):
 
         self.kernel_size       = (6, 40)
         self.stride            = 1
-        self.n_conv_sections   = 9
         self.n_input_sections  = 6
         self.n_feature_maps    = 50
         self.n_frequency_bands = 40
-        self.n_conv_sections   = 9
+        self.n_conv_sections   = 9 # set to one for global weight sharing
         self.n_section_length  = 4
 
         self.threshold = 6.2
@@ -37,7 +37,7 @@ class Conv(nn.Module):
         self.convs = nn.ModuleList(
             [
                 snn.Convolution(
-                    in_channels=1, out_channels=50, kernel_size=self.kernel_size, weight_mean=0.8, weight_std=0.05
+                    in_channels=1, out_channels=self.n_feature_maps, kernel_size=self.kernel_size, weight_mean=0.8, weight_std=0.05
                 ) for _ in range(self.n_conv_sections)
             ]
         )
@@ -205,7 +205,7 @@ def classify(ys_train, ts_train, ys_test, ts_test, iterations=1000):
     print(f'SVC run with {iterations} iterations')
     print(f'Accuracy on training data: {accuracy_score(ts_train, pred_train)}')
     print(f'Accuracy on testing data: {accuracy_score(ts_test, pred_test)}')
-
+    return pred_test
 
 def run():
 
@@ -224,9 +224,15 @@ def run():
 
     # Classify
     print("classify potential")
-    classify(ypots_train, ts_train, ypots_test, ts_test, iterations=2500)
-    print("classify spikes")
-    classify(yspikes_train, ts_train, yspikes_test, ts_test, iterations=2500)
+    pred_test_pots = classify(ypots_train, ts_train, ypots_test, ts_test, iterations=100)
+    plt.imshow(confusion_matrix(ts_test, pred_test_pots))
+    plt.title("Potential classifier confusion matrix")
+    plt.show()
+    print("Spikes classifier confusion matrix")
+    pred_test_spikes = classify(yspikes_train, ts_train, yspikes_test, ts_test, iterations=100)
+    plt.imshow(confusion_matrix(ts_test, pred_test_spikes))
+    plt.title("Spikes")
+    plt.show()
 
     # TODO: show what happens in feature maps
 
