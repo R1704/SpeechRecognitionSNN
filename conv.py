@@ -19,7 +19,7 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 
 class Conv(nn.Module):
-    def __init__(self):
+    def __init__(self, n_conv_sections):
         super(Conv, self).__init__()
 
         self.kernel_size       = (6, 40)
@@ -27,24 +27,24 @@ class Conv(nn.Module):
         self.n_input_sections  = 6
         self.n_feature_maps    = 50
         self.n_frequency_bands = 40
-        self.n_conv_sections   = 9 # set to one for global weight sharing
+        self.n_conv_sections   = n_conv_sections #9 # set to one for global weight sharing
         self.n_section_length  = 4
 
         self.threshold = 6.2
-
+        #self.trainsample_count = 0
 
         # Convolution
         self.convs = nn.ModuleList(
             [
                 snn.Convolution(
-                    in_channels=1, out_channels=self.n_feature_maps, kernel_size=self.kernel_size, weight_mean=0.8, weight_std=0.05
+                    in_channels=1, out_channels=self.n_feature_maps, kernel_size=self.kernel_size, weight_mean =0.8, weight_std=0.05
                 ) for _ in range(self.n_conv_sections)
             ]
         )
 
         # STDP
         self.stdps = nn.ModuleList(
-            [snn.STDP(conv_layer=conv, learning_rate=(0.004, -0.003)) for conv in self.convs]
+            [snn.STDP(conv_layer=conv, learning_rate=(0.004, 0.003)) for conv in self.convs]
         )
 
         # Pooling
@@ -202,65 +202,56 @@ def classify(ys_train, ts_train, ys_test, ts_test, iterations=1000):
     # Inference
     pred_train = svc.predict(ys_train)
     pred_test = svc.predict(ys_test)
+    test_acc = accuracy_score(ts_test, pred_test)
     print(f'SVC run with {iterations} iterations')
     print(f'Accuracy on training data: {accuracy_score(ts_train, pred_train)}')
-    print(f'Accuracy on testing data: {accuracy_score(ts_test, pred_test)}')
-    return pred_test
+    print(f'Accuracy on testing data: {test_acc}')
+    return pred_test, test_acc
 
 def run():
 
     # Prepare and get data
     train_loader, test_loader = prep_data()
+    feature_maps = [10, 20, 30, 40, 50]
+    for loc_weight_sharing in [True, False]:
+        pot_accuracies = []
+        spike_accuracies = []
+        for fm in feature_maps:
+            # Initialise Convolutional layer
+            network = Conv(n_conv_sections = 9 if loc_weight_sharing else 1)
+            network.n_feature_maps = fm
+            print(fm)
 
-    # Initialise Convolutional layer
-    network = Conv()
+            # run model
+            train(network, train_loader, n_epochs=1)
 
-    # run model
-    train(network, train_loader, n_epochs=1)
+            # Evaluate
+            ypots_train, yspikes_train, ts_train = evaluation(network, train_loader)
+            ypots_test, yspikes_test, ts_test = evaluation(network, test_loader)
 
-    # Evaluate
-    ypots_train, yspikes_train, ts_train = evaluation(network, train_loader)
-    ypots_test, yspikes_test, ts_test = evaluation(network, test_loader)
-
-    # Classify
-    print("classify potential")
-    pred_test_pots = classify(ypots_train, ts_train, ypots_test, ts_test, iterations=100)
-    plt.imshow(confusion_matrix(ts_test, pred_test_pots))
-    plt.title("Potential classifier confusion matrix")
+            # Classify
+            print("classify potential")
+            pred_test_pots, test_acc_pot = classify(ypots_train, ts_train, ypots_test, ts_test, iterations=1500)
+            #plt.imshow(confusion_matrix(ts_test, pred_test_pots))
+            #plt.title("Potential classifier confusion matrix")
+            #plt.show()
+            print("classify spikes")
+            pred_test_spikes, test_acc_spike = classify(yspikes_train, ts_train, yspikes_test, ts_test, iterations=1500)
+            #plt.imshow(confusion_matrix(ts_test, pred_test_spikes))
+            #plt.title("Spikes classifier confusion matrix")
+            #plt.show()
+            pot_accuracies.append(test_acc_pot)
+            spike_accuracies.append(test_acc_spike)
+        if loc_weight_sharing:
+            plt.plot(feature_maps, pot_accuracies, label='Local weight sharing, Potential Classsifier')
+            plt.plot(feature_maps, spike_accuracies, label='Local weight sharing, Spike Classifier')
+        else:
+            plt.plot(feature_maps, pot_accuracies, label='Global weight sharing, Potential Classifier')
+            plt.plot(feature_maps, spike_accuracies, label='Global weight sharing, Spike Classifier')
+    plt.legend()
+    plt.xlabel("Feature maps")
+    plt.ylabel("Accuracy")
     plt.show()
-    print("classify spikes")
-    pred_test_spikes = classify(yspikes_train, ts_train, yspikes_test, ts_test, iterations=100)
-    plt.imshow(confusion_matrix(ts_test, pred_test_spikes))
-    plt.title("Spikes classifier confusion matrix")
-    plt.show()
-
-    # TODO: show what happens in feature maps
-
-    # Results:
-    # accuracy at 0.84 with 2500 (and 0.85 with 5000) classifier iterations. Plain version
-
-    # Trimming and librosa's melspectogram converted to spectogram and then to spikepattern (2500 iterarions)
-    # Accuracy on training data: 1.0
-    # Accuracy on testing data: 0.9387205387205387
-
-    # Librosa's melspectogram converted to spectogram and then to spikepattern (no trimming) (2500 iterarions)
-    # Accuracy on training data: 0.9971139971139971
-    # Accuracy on testing data: 0.804040404040404
-
-    # Original encoding but trimmed
-    # SVC run with 2500 iterations
-    # Accuracy on training data: 1.0
-    # Accuracy on testing data: 0.9387205387205387
-
-    # Solved convergence warning & added spikes classifier
-    # classify potential
-    # SVC run with 2500 iterations
-    # Accuracy on training data: 1.0
-    # Accuracy on testing data: 0.9508417508417508
-    # classify spikes
-    # SVC run with 2500 iterations
-    # Accuracy on training data: 1.0
-    # Accuracy on testing data: 0.960942760942761
 
 if __name__ == '__main__':
     run()
