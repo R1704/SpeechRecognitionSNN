@@ -14,37 +14,38 @@ from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 import os
 import encoding
+from sklearn import preprocessing
 from sklearn.preprocessing import StandardScaler
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 
 class Conv(nn.Module):
-    def __init__(self, n_conv_sections):
+    def __init__(self):
         super(Conv, self).__init__()
 
         self.kernel_size       = (6, 40)
         self.stride            = 1
         self.n_input_sections  = 6
-        self.n_feature_maps    = 50
+        self.n_feature_maps    = 50 # 50 for TIDIGITS, 70 for TIMIT
         self.n_frequency_bands = 40
-        self.n_conv_sections   = n_conv_sections #9 # set to one for global weight sharing
+        self.n_conv_sections   = 9 # set to one for global weight sharing (otherwise 9)
         self.n_section_length  = 4
 
         self.threshold = 6.2
-        #self.trainsample_count = 0
+
 
         # Convolution
         self.convs = nn.ModuleList(
             [
                 snn.Convolution(
-                    in_channels=1, out_channels=self.n_feature_maps, kernel_size=self.kernel_size, weight_mean =0.8, weight_std=0.05
+                    in_channels=1, out_channels=self.n_feature_maps, kernel_size=self.kernel_size, weight_mean=0.8, weight_std=0.05
                 ) for _ in range(self.n_conv_sections)
             ]
         )
 
         # STDP
         self.stdps = nn.ModuleList(
-            [snn.STDP(conv_layer=conv, learning_rate=(0.004, 0.003)) for conv in self.convs]
+            [snn.STDP(conv_layer=conv, learning_rate=(0.004, -0.003)) for conv in self.convs]
         )
 
         # Pooling
@@ -66,7 +67,9 @@ class Conv(nn.Module):
             # get the spikes for each section
             spks = [sf.fire(potentials=pot, threshold=self.threshold) for pot in pots]
             # Get one winner and shut other neurons off; lateral inhibition
-            winners = [sf.get_k_winners(pots[i], 1, inhibition_radius=0, spikes=spks[i]) for i in range(self.n_conv_sections)]  # change inhibition radius ?
+            pots = [sf.threshold(pot) for pot in pots]
+            pots = [sf.pointwise_inhibition(pot) for pot in pots]  # inhibition
+            winners = [sf.get_k_winners(pots[i], 1, inhibition_radius=0, spikes=spks[i]) for i in range(self.n_conv_sections)]
             self.save_data(sec_data, pots, spks, winners)
 
         if not self.training:
@@ -114,27 +117,54 @@ def one_hot_decoding(data):
     # spikes = np.zeros((shape[0], shape[1], shape[2]))
     return data.argmax(axis=3)
 
-
-def prep_data():
-
-    # Creating data
-    # results = encoding.run()
-    # ttfs_spikes_train = results[0]
-    # ttfs_spikes_test = results[1]
-
+def get_TIMIT():
     # Loading data (41 frames, 40 frequency bands)
-    #ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_v2_train.p')
-    #ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_v2_test.p')
+    ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/TIMIT_mel_v2_train.p')
+    ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/TIMIT_mel_v2_test.p')
+
+    # Samples
+    train_samples = ttfs_spikes_train['TRAIN_samples']
+    test_samples = ttfs_spikes_test['TEST_samples']
+    ttfs_spikes_all = np.concatenate((train_samples, test_samples), axis=0)
+
+    # Labels
+    train_labels = ttfs_spikes_train['TRAIN_labels']
+    test_labels = ttfs_spikes_test['TEST_labels']
+
+    return ttfs_spikes_all, train_labels, test_labels
+
+def get_TIDIGITS():
     ttfs_spikes_train = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_mel_train.p')
     ttfs_spikes_test = pd.read_pickle(r'ttfs_spikes_data/ttfs_spikes_mel_test.p')
     ttfs_spikes_all = np.concatenate((ttfs_spikes_train, ttfs_spikes_test), axis=0)
+
+    # load labels
+    train_mat = sio.loadmat("data/TIDIGIT_train.mat")
+    test_mat = sio.loadmat("data/TIDIGIT_test.mat")
+    train_labels = train_mat['train_labels'].astype(int)
+    test_labels = test_mat['test_labels'].astype(int)
+
+    return ttfs_spikes_all, train_labels, test_labels
+
+
+
+def prep_data(dataset):
+    if dataset == 'TIDIGITS':
+        ttfs_spikes_all, train_labels, test_labels = get_TIDIGITS()
+
+    else:
+        ttfs_spikes_all, train_labels, test_labels = get_TIMIT()
+
+    # show example because we like visuals
+    plt.imshow(ttfs_spikes_all[0])
+    plt.show()
 
     # one hot encode to use on snn
     spikes = one_hot_encoding(ttfs_spikes_all.astype(int))
     print(f'shape after one hot encoding {spikes.shape}')  # [samples, time-frames, frequency-bands, time-points] [4950, 41, 40, 32]
 
     # show example because we like visuals
-    plt.imshow(ttfs_spikes_train[0])
+    plt.imshow(ttfs_spikes_all[0])
     plt.show()
 
     # switch axes because spyketorch
@@ -146,15 +176,14 @@ def prep_data():
     spikes = spikes[:, :, np.newaxis, :]
     print(f'shape after adding axis {spikes.shape}')
 
-    # load labels
-    train_mat = sio.loadmat("data/TIDIGIT_train.mat")
-    test_mat = sio.loadmat("data/TIDIGIT_test.mat")
-    train_targets = train_mat['train_labels'].astype(int)
-    test_targets = test_mat['test_labels'].astype(int)
-    all_targets = np.concatenate((train_targets, test_targets), axis=0)
+    all_labels = np.concatenate((train_labels, test_labels), axis=0)
+    if dataset == 'TIMITS':
+        label_enc = preprocessing.LabelEncoder()
+        all_labels = label_enc.fit_transform(all_labels)
+        all_labels = torch.as_tensor(all_labels)
 
     # split data
-    X_train, X_test, y_train, y_test = train_test_split(spikes, all_targets, test_size=0.3, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(spikes, all_labels, test_size=0.3, random_state=42)
     print("X_train", X_train.shape, "X_test", X_test.shape)
 
     # prepare Dataloader
@@ -164,7 +193,6 @@ def prep_data():
     test_loader = DataLoader(test_torchset, batch_size=64)
 
     return train_loader, test_loader
-
 
 def train(network, data, n_epochs=1):
     print('Starting training ...')
@@ -202,56 +230,67 @@ def classify(ys_train, ts_train, ys_test, ts_test, iterations=1000):
     # Inference
     pred_train = svc.predict(ys_train)
     pred_test = svc.predict(ys_test)
-    test_acc = accuracy_score(ts_test, pred_test)
     print(f'SVC run with {iterations} iterations')
     print(f'Accuracy on training data: {accuracy_score(ts_train, pred_train)}')
-    print(f'Accuracy on testing data: {test_acc}')
-    return pred_test, test_acc
+    print(f'Accuracy on testing data: {accuracy_score(ts_test, pred_test)}')
+    return pred_test
 
 def run():
 
     # Prepare and get data
-    train_loader, test_loader = prep_data()
-    feature_maps = [10, 20, 30, 40, 50]
-    for loc_weight_sharing in [True, False]:
-        pot_accuracies = []
-        spike_accuracies = []
-        for fm in feature_maps:
-            # Initialise Convolutional layer
-            network = Conv(n_conv_sections = 9 if loc_weight_sharing else 1)
-            network.n_feature_maps = fm
-            print(fm)
+    train_loader, test_loader = prep_data('TIMITS')  # TIMITS or TIDIGITS
 
-            # run model
-            train(network, train_loader, n_epochs=1)
+    # Initialise Convolutional layer
+    network = Conv()
 
-            # Evaluate
-            ypots_train, yspikes_train, ts_train = evaluation(network, train_loader)
-            ypots_test, yspikes_test, ts_test = evaluation(network, test_loader)
+    # run model
+    train(network, train_loader, n_epochs=1)
 
-            # Classify
-            print("classify potential")
-            pred_test_pots, test_acc_pot = classify(ypots_train, ts_train, ypots_test, ts_test, iterations=1500)
-            #plt.imshow(confusion_matrix(ts_test, pred_test_pots))
-            #plt.title("Potential classifier confusion matrix")
-            #plt.show()
-            print("classify spikes")
-            pred_test_spikes, test_acc_spike = classify(yspikes_train, ts_train, yspikes_test, ts_test, iterations=1500)
-            #plt.imshow(confusion_matrix(ts_test, pred_test_spikes))
-            #plt.title("Spikes classifier confusion matrix")
-            #plt.show()
-            pot_accuracies.append(test_acc_pot)
-            spike_accuracies.append(test_acc_spike)
-        if loc_weight_sharing:
-            plt.plot(feature_maps, pot_accuracies, label='Local weight sharing, Potential Classsifier')
-            plt.plot(feature_maps, spike_accuracies, label='Local weight sharing, Spike Classifier')
-        else:
-            plt.plot(feature_maps, pot_accuracies, label='Global weight sharing, Potential Classifier')
-            plt.plot(feature_maps, spike_accuracies, label='Global weight sharing, Spike Classifier')
-    plt.legend()
-    plt.xlabel("Feature maps")
-    plt.ylabel("Accuracy")
+    # Evaluate
+    ypots_train, yspikes_train, ts_train = evaluation(network, train_loader)
+    ypots_test, yspikes_test, ts_test = evaluation(network, test_loader)
+
+    # Classify
+    iterations = 2500
+    print("classify potential")
+    pred_test_pots = classify(ypots_train, ts_train, ypots_test, ts_test, iterations=iterations)
+    plt.imshow(confusion_matrix(ts_test, pred_test_pots))
+    plt.title("Potential classifier confusion matrix")
     plt.show()
+
+    print("classify spikes")
+    pred_test_spikes = classify(yspikes_train, ts_train, yspikes_test, ts_test, iterations=iterations)
+    plt.imshow(confusion_matrix(ts_test, pred_test_spikes))
+    plt.title("Spikes classifier confusion matrix")
+    plt.show()
+
+    # TODO: show what happens in feature maps
+
+    # Results:
+    # accuracy at 0.84 with 2500 (and 0.85 with 5000) classifier iterations. Plain version
+
+    # Trimming and librosa's melspectogram converted to spectogram and then to spikepattern (2500 iterarions)
+    # Accuracy on training data: 1.0
+    # Accuracy on testing data: 0.9387205387205387
+
+    # Librosa's melspectogram converted to spectogram and then to spikepattern (no trimming) (2500 iterarions)
+    # Accuracy on training data: 0.9971139971139971
+    # Accuracy on testing data: 0.804040404040404
+
+    # Original encoding but trimmed
+    # SVC run with 2500 iterations
+    # Accuracy on training data: 1.0
+    # Accuracy on testing data: 0.9387205387205387
+
+    # Solved convergence warning & added spikes classifier
+    # classify potential
+    # SVC run with 2500 iterations
+    # Accuracy on training data: 1.0
+    # Accuracy on testing data: 0.9508417508417508
+    # classify spikes
+    # SVC run with 2500 iterations
+    # Accuracy on training data: 1.0
+    # Accuracy on testing data: 0.960942760942761
 
 if __name__ == '__main__':
     run()
